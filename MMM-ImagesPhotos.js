@@ -285,7 +285,10 @@ Module.register(ourModuleName, {
         // Append this image to the div
         this.fg.appendChild(img);
 
-        /* set the image load error handler
+		//modification for ShowMessage
+		this.sendNotification("IMAGEFILEPATH", img.src);
+		
+		/* set the image load error handler
            report the image load failed
            go load the next one with no delay
         */   
