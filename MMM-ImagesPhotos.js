@@ -1,12 +1,12 @@
-/* global Log MM Module */
-
 /*
  * MagicMirror²
  * Module: MMM-ImagesPhotos
  *
  * By Rodrigo Ramírez Norambuena https://rodrigoramirez.com
+ *
  * MIT Licensed.
  */
+
 const ourModuleName = "MMM-ImagesPhotos";
 
 Module.register(ourModuleName, {
@@ -21,7 +21,11 @@ Module.register(ourModuleName, {
     path: "",
     fill: false,
     blur: 8,
-    sequential: false
+    sequential: false,
+    // Touch gesture configuration.
+    swipeDistance: 50,
+    tapDistance: 10,
+    touch: false
   },
 
   wrapper: null,
@@ -29,15 +33,39 @@ Module.register(ourModuleName, {
   timer: null,
   fullscreen: false,
 
+  touchStartX: 0,
+  touchStartY: 0,
+  touchStartTime: 0,
+  touchMoved: false,
+
   requiresVersion: "2.24.0", // Required version of MagicMirror
+
+  /**
+   * Initialize module state.
+   *
+   * Creates the slideshow controller, history, and playback
+   * structures before requesting the initial photo list.
+   */
 
   start() {
     this.photos = [];
     this.loaded = false;
-    this.lastPhotoIndex = -1;
+
+    // Current photo being displayed.
+    this.currentIndex = -1;
+
+    // Playback order used by shuffle mode.
+    this.playlist = [];
+    this.playlistPosition = -1;
+
+    // History of viewed photos.
+    this.history = [];
+    this.historyPosition = -1;
+
     this.config.id = this.identifier;
     this.sendSocketNotification("CONFIG", this.config);
   },
+
   getStyles() {
     return ["MMM-ImagesPhotos.css"];
   },
@@ -73,8 +101,16 @@ Module.register(ourModuleName, {
       Log.error(self.name, error);
     }
   },
+
+  /**
+   * Handle MagicMirror notifications.
+   *
+   * Responds to slideshow control notifications and determines
+   * whether this module is running in a fullscreen region.
+   */
+
   notificationReceived(notification, payload, sender) {
-    // Hook to turn off messages about notiofications, clock once a second
+    // Detect fullscreen positions
     if (notification === "ALL_MODULES_STARTED") {
       const ourInstances = MM.getModules().withClass(ourModuleName);
       ourInstances.forEach((m) => {
@@ -83,13 +119,57 @@ Module.register(ourModuleName, {
         }
       });
     }
+
+    // Navigation controls
+    if (notification === "IMAGE_NEXT") {
+      this.showNextPhoto();
+      this.updateDom(this.config.animationSpeed);
+    }
+
+    if (notification === "IMAGE_PREVIOUS") {
+      this.showPreviousPhoto();
+      this.updateDom(this.config.animationSpeed);
+    }
+
+    if (notification === "IMAGE_PAUSE") {
+      this.suspend();
+    }
+
+    if (notification === "IMAGE_RESUME") {
+      this.resume()
+    }
+
+    if (notification === "IMAGE_TOGGLE_PAUSE") {
+      if (this.suspended) {
+        this.resume();
+      } else {
+        this.suspend();
+      }
+    }
   },
+
+  /**
+   * Start or restart the slideshow timer.
+   *
+   * Only one timer is active at a time. When the timer expires,
+   * the slideshow advances to the next image and refreshes
+   * the display.
+   */
+
   startTimer() {
     const self = this;
-    self.timer = setTimeout(() => {
-      // Clear timer value for resume
+
+    // Cancel any existing timer.
+    if (self.timer !== null) {
+      clearTimeout(self.timer);
       self.timer = null;
-      if (self.suspended === false) {
+    }
+
+    self.timer = setTimeout(() => {
+      self.timer = null;
+
+      if (!self.suspended) {
+        self.advancePhoto();
         self.updateDom(self.config.animationSpeed);
       }
     }, this.config.updateInterval);
@@ -120,40 +200,140 @@ Module.register(ourModuleName, {
     }, nextLoad);
   },
 
-  /*
-   * Generate a random index for a list of photos.
+  /**
+   * Build the slideshow playback order.
    *
-   * argument photos Array<String> - Array with photos.
-   *
-   * return Number - Random index.
+   * Sequential mode preserves the source order.
+   * Shuffle mode randomizes the list using a Fisher-Yates shuffle
+   * so every image is displayed once before repeating.
    */
-  randomIndex(photos) {
-    if (photos.length === 1) {
-      return 0;
+  buildPlaylist() {
+    this.playlist = [];
+
+    for (let i = 0; i < this.photos.length; i++) {
+      this.playlist.push(i);
     }
 
-    const generate = () => Math.floor(Math.random() * photos.length);
-
-    let photoIndex =
-      this.lastPhotoIndex === photos.length - 1 ? 0 : this.lastPhotoIndex + 1;
     if (!this.config.sequential) {
-      photoIndex = generate();
+      for (let i = this.playlist.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [this.playlist[i], this.playlist[j]] =
+          [this.playlist[j], this.playlist[i]];
+      }
     }
-    this.lastPhotoIndex = photoIndex;
 
-    return photoIndex;
+    this.playlistPosition = -1;
+
   },
 
-  /*
-   * Retrieve a random photos.
+  /**
+   * Record a displayed image.
    *
-   * return photo Object - A photo.
+   * The viewing history allows manual navigation without
+   * affecting the slideshow playback order.
    */
-  randomPhoto() {
-    const { photos } = this;
-    const index = this.randomIndex(photos);
+  addToHistory(index) {
+    this.history.push(index);
+    this.historyPosition = this.history.length - 1;
+  },
 
-    return photos[index];
+  /**
+   * Advance the slideshow.
+   *
+   * Selects the next image from the playback playlist,
+   * rebuilding the playlist when every image has been shown.
+   *
+   * @returns {Object|null} Selected photo object.
+   */
+  advancePhoto() {
+    if (!this.photos.length) {
+      return null;
+    }
+
+    if (!this.playlist.length) {
+      this.buildPlaylist();
+    }
+
+    // Start a new playlist after every image has been shown.
+    if (this.playlistPosition >= this.playlist.length - 1) {
+      this.buildPlaylist();
+    }
+
+    this.playlistPosition++;
+
+    this.currentIndex = this.playlist[this.playlistPosition];
+
+    this.addToHistory(this.currentIndex);
+
+    return this.photos[this.currentIndex];
+  },
+
+  /**
+   * Display the next image.
+   *
+   * Moves forward through browsing history when available.
+   * Otherwise advances the slideshow to a new image.
+   *
+   * @returns {Object|null} Selected photo object.
+   */
+  showNextPhoto() {
+    if (!this.photos.length) {
+      return null;
+    }
+
+    // User is walking forward through history.
+    if (this.historyPosition < this.history.length - 1) {
+      this.historyPosition++;
+      this.currentIndex = this.history[this.historyPosition];
+
+      return this.photos[this.currentIndex];
+    }
+
+    // Already at newest image.
+    return this.advancePhoto();
+  },
+
+  /**
+ * Display the previous image.
+ *
+ * Navigates backward through the viewing history without
+ * changing the slideshow playback order.
+ *
+ * @returns {Object|null} Selected photo object.
+ */
+  showPreviousPhoto() {
+    if (!this.photos.length) {
+      return null;
+    }
+
+    if (this.historyPosition <= 0) {
+      return this.photos[this.currentIndex];
+    }
+
+    this.historyPosition--;
+
+    this.currentIndex = this.history[this.historyPosition];
+
+    return this.photos[this.currentIndex];
+  },
+
+  /**
+   * Return the currently selected image.
+   *
+   * Initializes slideshow playback on the first request.
+   *
+   * @returns {Object|null} Current photo object.
+   */
+  getCurrentPhoto() {
+    if (!this.photos.length) {
+      return null;
+    }
+
+    if (this.currentIndex === -1) {
+      return this.advancePhoto();
+    }
+
+    return this.photos[this.currentIndex];
   },
 
   scaleImage(srcwidth, srcheight, targetwidth, targetheight, fLetterBox) {
@@ -199,6 +379,13 @@ Module.register(ourModuleName, {
     return result;
   },
 
+
+  /**
+   * Pause slideshow playback.
+   *
+   * Stops the active slideshow timer while preserving
+   * the current image and navigation state.
+   */
   suspend() {
     this.suspended = true;
     if (this.timer !== null) {
@@ -206,11 +393,82 @@ Module.register(ourModuleName, {
       this.timer = null;
     }
   },
+
+  /**
+   * Resume slideshow playback.
+   *
+   * Advances to the next image and restarts automatic
+   * slideshow progression.
+   */
   resume() {
     this.suspended = false;
-    if (this.timer === null) {
-      this.startTimer();
-    }
+
+    this.advancePhoto();
+    this.updateDom(this.config.animationSpeed);
+  },
+
+
+  /**
+   * Register touchscreen gesture handlers.
+   *
+   * Supports swipe navigation and tap-to-pause controls.
+   * Listeners are attached to a persistent element because
+   * slideshow images are recreated during each DOM update.
+   */
+  attachTouchHandlers(element) {
+    const SWIPE_DISTANCE = this.config.swipeDistance;
+    const TAP_DISTANCE = this.config.tapDistance;
+
+    element.addEventListener("touchstart", (event) => {
+      const touch = event.touches[0];
+
+      this.touchStartX = touch.clientX;
+      this.touchStartY = touch.clientY;
+      this.touchStartTime = Date.now();
+      this.touchMoved = false;
+    });
+
+    element.addEventListener("touchmove", (event) => {
+      const touch = event.touches[0];
+
+      if (
+        Math.abs(touch.clientX - this.touchStartX) > TAP_DISTANCE ||
+        Math.abs(touch.clientY - this.touchStartY) > TAP_DISTANCE
+      ) {
+        this.touchMoved = true;
+      }
+    });
+
+    element.addEventListener("touchend", (event) => {
+
+      const touch = event.changedTouches[0];
+
+      const dx = touch.clientX - this.touchStartX;
+      const dy = touch.clientY - this.touchStartY;
+
+      // Ignore mostly vertical gestures.
+      if (Math.abs(dy) > Math.abs(dx)) {
+      }
+
+      // Swipe left -> next
+      if (dx < -SWIPE_DISTANCE) {
+        this.showNextPhoto();
+        this.updateDom(this.config.animationSpeed);
+        return;
+      }
+
+      // Swipe right -> previous
+      if (dx > SWIPE_DISTANCE) {
+        this.showPreviousPhoto();
+        this.updateDom(this.config.animationSpeed);
+        return;
+      }
+
+      // Tap toggles pause
+      if (!this.touchMoved) {
+        this.suspended ? this.resume() : this.suspend();
+      }
+    });
   },
 
   getDom() {
@@ -220,13 +478,17 @@ Module.register(ourModuleName, {
     return this.getDomnotFS();
   },
 
+  /**
+   * Build the module DOM for standard (non-fullscreen) layouts.
+   */
   getDomnotFS() {
     const self = this;
     const wrapper = document.createElement("div");
-    const photoImage = this.randomPhoto();
+    const photoImage = this.getCurrentPhoto();
 
     if (photoImage) {
       const img = document.createElement("img");
+      this.attachTouchHandlers(img);
       img.src = photoImage.url;
       img.id = "mmm-images-photos";
       img.style.maxWidth = this.config.maxWidth;
@@ -239,6 +501,12 @@ Module.register(ourModuleName, {
     return wrapper;
   },
 
+  /**
+   * Build the module DOM for fullscreen layouts.
+   *
+   * Reuses persistent DOM elements to minimize image flicker
+   * during slideshow transitions.
+   */
   getDomFS() {
     const self = this;
     // If wrapper div not yet created
@@ -246,6 +514,7 @@ Module.register(ourModuleName, {
       // Create it once, try to reduce image flash on change
 
       this.wrapper = document.createElement("div");
+
       this.bk = document.createElement("div");
       this.bk.className = "bgimagefs";
       if (this.config.fill === true) {
@@ -257,6 +526,9 @@ Module.register(ourModuleName, {
       this.wrapper.appendChild(this.bk);
       this.fg = document.createElement("div");
       this.wrapper.appendChild(this.fg);
+      if (this.config.touch) {
+        this.attachTouchHandlers(this.wrapper);
+      }
     }
     if (this.photos.length) {
       // Get the size of the margin, if any, we want to be full screen
@@ -268,7 +540,8 @@ Module.register(ourModuleName, {
       this.fg.style.border = "none";
       this.fg.style.margin = "0px";
 
-      const photoImage = this.randomPhoto();
+      const photoImage = this.getCurrentPhoto();
+
       let img = null;
       if (photoImage) {
         // Create img tag element
@@ -285,6 +558,19 @@ Module.register(ourModuleName, {
         // Append this image to the div
         this.fg.appendChild(img);
 
+        /* set the image load error handler
+               report the image load failed
+               go load the next one with no delay
+            */
+        img.onerror = (evt) => {
+          const eventImage = evt.currentTarget;
+          Log.error(
+            `image load failed=${eventImage.src}`
+          );
+
+          this.showNextPhoto();
+          this.updateDom()
+        }
         /*
          * Set the onload event handler
          * The loadurl request will happen when the html is returned to MM and inserted into the dom.
@@ -292,9 +578,6 @@ Module.register(ourModuleName, {
         img.onload = (evt) => {
           // Get the image of the event
           const eventImage = evt.currentTarget;
-          Log.log(
-            `image loaded=${eventImage.src} size=${eventImage.width}:${eventImage.height}`
-          );
 
           // What's the size of this image and it's parent
           const w = eventImage.width;
@@ -308,11 +591,6 @@ Module.register(ourModuleName, {
           // Adjust the image size
           eventImage.width = result.width;
           eventImage.height = result.height;
-
-          Log.log(`image setting size to ${result.width}:${result.height}`);
-          Log.log(
-            `image setting top to ${result.targetleft}:${result.targettop}`
-          );
 
           // Adjust the image position
           eventImage.style.left = `${result.targetleft}px`;
@@ -335,7 +613,9 @@ Module.register(ourModuleName, {
           if (self.config.fill === true) {
             self.bk.style.backgroundImage = `url(${self.fg.firstChild.src})`;
           }
-          self.startTimer();
+          if (!self.suspended) {
+            self.startTimer();
+          }
         };
       }
     }
@@ -346,14 +626,29 @@ Module.register(ourModuleName, {
     return ["MMM-ImagesPhotos.css"];
   },
 
+  /**
+   * Process an updated photo list.
+   *
+   * Initializes the playback playlist when photos are first
+   * received and refreshes the module after the initial load.
+   */
   processPhotos(data) {
     const self = this;
+
+    // Save the latest photo list first.
     this.photos = data;
+
+    // Build the playback order after photos exist.
+    if (!this.playlist.length && this.photos.length) {
+      this.buildPlaylist();
+    }
+
     if (this.loaded === false) {
       if (this.suspended === false) {
         self.updateDom(self.config.animationSpeed);
       }
     }
+
     this.loaded = true;
   }
 });

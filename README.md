@@ -1,9 +1,18 @@
 # MMM-ImagesPhotos
 
-This is a module for the [MagicMirror²](https://github.com/MichMich/MagicMirror). It will show photos from a directory.
+This is a module for the [MagicMirror²](https://github.com/MichMich/MagicMirror). It displays photos from a directory.
 
 This module reads the images from the _uploads_ directory inside the module.
-**Directory**: `~/MagicMirror/modules/MMM-ImagesPhotos/uploads`
+
+**Directory:** `~/MagicMirror/modules/MMM-ImagesPhotos/uploads`
+
+## Features
+
+- Displays photos from a local directory
+- Sequential or non-repeating shuffled playback
+- Fullscreen and windowed display modes
+- Optional touchscreen navigation
+- Notification-based slideshow controls
 
 ## Installation
 
@@ -20,56 +29,87 @@ npm install
 
 ![Demo](.github/animate.gif)
 
+## Interactive Slideshow
+
+MMM-ImagesPhotos includes an optional interactive slideshow mode for touchscreen displays.
+
+When `touch` is enabled, the following gestures are available:
+
+| Gesture | Action |
+|----------|--------|
+| Swipe left | Show next photo |
+| Swipe right | Show previous photo |
+| Tap | Pause or resume slideshow |
+
+Touch support is disabled by default and must be enabled in the module configuration.
+
+When `sequential` is `false`, images are displayed using a shuffled playlist. Every image is shown once before the playlist is reshuffled, preventing immediate repeats.
+
 ## Config
 
 The entry in `config.js` can include the following options:
 
 <!-- prettier-ignore-start -->
-| Option             | Description
-|--------------------|-----------
-| `opacity`          | The opacity of the image.<br><br>**Type:** `double`<br>Default 0.9
-| `animationSpeed`   | How long the fade out and fade in of photos should take.<br><br>**Type:** `int`<br>Default 500
-| `updateInterval`   | How long before loading a new image.<br><br>**Type:** `int`(milliseconds) <br>Default 5000 milliseconds
-| `getInterval`      | Interval value to get new images from directory.<br><br>**Type:** `int`(milliseconds) <br>Default 60000 milliseconds
-| `sequential`       | true or false, whether to process the images randomly(default) or sequentially<br>Default false
-| only when position is `NOT` fullscreen_below or fullscreen_above|
-| `maxWidth`         | Value for maximum width. Optional, possible values: absolute (e.g. "700px") or relative ("50%") <br> Default 100%
-| `maxHeight`        | Value for maximum height. Optional, possible values: absolute (e.g. "400px") or relative ("70%") <br> Default 100%
-|only when position `IS` fullscreen_below or fullscreen_above 
-| `backgroundColor`  | Value for color used to fill around the image if not fullscreen,  can be #xxyyzz, like #808080 (grey),<br> if fill is true, the backgroundColor setting is ignored<br>Default 'black'
-| `fill`             | true or false,  instead of color use a blurred copy of the image to fill around the image, <br>Default false.
-| `blur`             | the size of the pixel blur of the background fill, <br>Default 8
+| Option             | Description |
+|--------------------|-------------|
+| `opacity`          | The opacity of the image.<br><br>**Type:** `double`<br>Default `0.9` |
+| `animationSpeed`   | How long the fade out and fade in of photos should take.<br><br>**Type:** `int`<br>Default `500` |
+| `updateInterval`   | How long before loading a new image.<br><br>**Type:** `int` (milliseconds)<br>Default `5000` |
+| `getInterval`      | How often to refresh the image list from the directory.<br><br>**Type:** `int` (milliseconds)<br>Default `60000` |
+| `sequential`       | Display images sequentially (`true`) or using a non-repeating shuffled playlist (`false`).<br><br>Default `false` |
+| `touch`            | Enable touchscreen gesture support.<br><br>**Type:** `boolean`<br>Default `false` |
+| `swipeDistance`    | Minimum horizontal movement (pixels) required to detect a swipe.<br><br>**Type:** `int`<br>Default `50` |
+| `tapDistance`      | Maximum finger movement (pixels) still considered a tap.<br><br>**Type:** `int`<br>Default `10` |
+| only when position is `NOT` `fullscreen_below` or `fullscreen_above` ||
+| `maxWidth`         | Maximum image width. Possible values are absolute (for example `"700px"`) or relative (for example `"50%"`).<br><br>Default `"100%"` |
+| `maxHeight`        | Maximum image height. Possible values are absolute (for example `"400px"`) or relative (for example `"70%"`).<br><br>Default `"100%"` |
+| only when position `IS` `fullscreen_below` or `fullscreen_above` ||
+| `backgroundColor`  | Background color shown around the image when `fill` is `false`. Accepts standard CSS colors (for example `#808080`).<br><br>Default `"black"` |
+| `fill`             | Fill unused screen space with a blurred copy of the current image.<br><br>Default `false` |
+| `blur`             | Blur radius used when `fill` is enabled.<br><br>Default `8` |
 
+## Example Configuration
 
-Here is an example of an entry in `config.js`
-not fullscreen
+### Standard display
+
 ```js
 {
- module: "MMM-ImagesPhotos",
- position: "middle_center",
- config: {
-  opacity: 0.9,
-  animationSpeed: 500,
-  updateInterval: 5000,
-  maxHeight: "500px",
-  maxWidth:"500px",
-  sequential: false  // process the image list randomly
- }
+  module: "MMM-ImagesPhotos",
+  position: "middle_center",
+  config: {
+    opacity: 0.9,
+    animationSpeed: 500,
+    updateInterval: 5000,
+    maxHeight: "500px",
+    maxWidth: "500px",
+
+    sequential: false,
+
+    touch: true,
+    swipeDistance: 50,
+    tapDistance: 10
+  }
 },
 ```
-fullscreen
-```
+
+### Fullscreen display
+
+```js
 {
-	module: "MMM-ImagesPhotos",
-	position: "fullscreen_below",
-	config: {
-		opacity: 0.9,
-		animationSpeed: 500,
-		updateInterval: 5000,
-		backgroundColor: 'grey',  // not used if fill is true
-		fill: false,   // fill around image with blurred copy of image
-		blur: 10,   // only used if fill is true
-		sequential: false  // process the image list randomly
-	}
+  module: "MMM-ImagesPhotos",
+  position: "fullscreen_below",
+  config: {
+    opacity: 0.9,
+    animationSpeed: 500,
+    updateInterval: 5000,
+
+    backgroundColor: "grey",
+    fill: false,
+    blur: 10,
+
+    sequential: false,
+
+    touch: true
+  }
 },
 ```
