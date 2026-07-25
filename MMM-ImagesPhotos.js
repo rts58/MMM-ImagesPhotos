@@ -498,6 +498,7 @@ Module.register(ourModuleName, {
 
     if (photoImage) {
       const img = document.createElement("img");
+      this.attachTouchHandlers(img);
       img.src = photoImage.url;
       img.id = "mmm-images-photos";
       img.style.maxWidth = this.config.maxWidth;
